@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Daily Gospel v1.05</title>
+<style>
+  html, body { margin:0; height:100%; overflow:hidden; background:#101820; color:#f4efe6; font-family:Georgia, serif; }
+  #hdr { position:fixed; top:0; left:0; right:0; z-index:2; text-align:center; padding:3vh 4vw 2vh;
+         background:linear-gradient(#101820 75%, rgba(16,24,32,0)); }
+  #hdr .d { font-size:2.6vh; letter-spacing:.2em; text-transform:uppercase; color:#c9a44c; }
+  #hdr .t { font-size:5.5vh; margin-top:1vh; }
+  #hdr .r { font-size:3vh; color:#bcb4a6; font-style:italic; }
+  #win { position:absolute; top:22vh; bottom:0; left:0; right:0; overflow:hidden; }
+  #roll { position:absolute; left:10vw; right:10vw; line-height:1.55; white-space:pre-line; text-align:center; }
+  #fade { position:fixed; left:0; right:0; bottom:0; height:10vh; background:linear-gradient(rgba(16,24,32,0), #101820); }
+  #credit { position:fixed; bottom:1.2vh; right:1.5vw; z-index:3; font-size:1.5vh; color:#6f7a84; }
+  #dbg { position:fixed; top:0; left:0; right:0; z-index:10; padding:.6vh 1vw; font:1.5vh monospace; background:#000; color:#0f0; white-space:pre-wrap; word-break:break-all; display:none; }
+  #msg { position:fixed; bottom:1.2vh; left:1.5vw; z-index:9; font:1.6vh monospace; color:#7f8b96; }
+</style>
+</head>
+<body>
+<div id="hdr"><div class="d"></div><div class="t">The Holy Gospel</div><div class="r"></div></div>
+<div id="win"><div id="roll"></div></div>
+<div id="fade"></div>
+<div id="credit"></div>
+<div id="msg"></div>
+<div id="dbg"></div>
+
+<script>
+/* Daily Gospel for Yodeck - version 1.05 */
+var APP_VERSION = "1.05";
+
+/* ===== DEFAULT SETTINGS (can be overridden in Yodeck's app settings) ===== */
+var SETTINGS = {
+  speed: 80,          // scroll speed, pixels per second
+  font: 4.2,          // text size, % of screen height
+  bg: "#101820",      // background color
+  fg: "#f4efe6",      // text color
+  accent: "#c9a44c",  // color of the day line at the top
+  error_seconds: 10,  // how long to show an error before moving on
+  runBefore: 0        // only run when the minute is <= this (0 or 60 = always run)
+};
+var FEED = "https://feed.evangelizo.org/v2/reader.php";
+
+var roll = document.getElementById("roll");
+var win  = document.getElementById("win");
+var msg  = document.getElementById("msg");
+var DEBUG = "";
+var data = null, loadedFor = "", loading = null, loadError = null, running = false;
+
+/* Today's date as YYYYMMDD in the player's local time */
+function today() {
+  var d = new Date();
+  return d.getFullYear() + String(d.getMonth() + 1).padStart(2, "0") + String(d.getDate()).padStart(2, "0");
+}
+
+/* Turn a bit of feed HTML into plain text, keeping <br> line breaks */
+function toText(html) {
+  var el = document.createElement("div");
+  el.innerHTML = html;
+  el.querySelectorAll("br").forEach(function (br) { br.replaceWith("\n"); });
+  return el.textContent.replace(/[ \t]+\n/g, "\n").replace(/\n{2,}/g, "\n").trim();
+}
+
+function get(params) {
+  var q = Object.keys(params).map(function (k) { return k + "=" + encodeURIComponent(params[k]); }).join("&");
+  return fetch(FEED + "?" + q, { cache: "no-store" }).then(function (r) {
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r.text();
+  });
+}
+
+function load() {
+  var date = today();
+  if (data && loadedFor === date) return Promise.resolve();
+  if (loading) return loading;
+  loadError = null;
+  loading = Promise.all([
+    get({ date: date, type: "reading",    content: "GSP", lang: "AM" }),
+    get({ date: date, type: "reading_st", content: "GSP", lang: "AM" }),
+    get({ date: date, type: "liturgic_t", lang: "AM" })
+  ]).then(function (res) {
+    var body = toText(res[0]);
+    var cut = body.search(/Copyright/i);
+    var credit = "";
+    if (cut >= 0) {
+      credit = body.slice(cut).split("\n")[0].trim();   // keep just the copyright line
+      body = body.slice(0, cut).trim();
+    }
+    if (!body || /Error\s*:/i.test(body)) throw new Error("no Gospel text in feed");
+    data = { txt: body, ref: toText(res[1]), day: toText(res[2]), credit: credit };
+    loadedFor = date;
+    render();
+  }).catch(function (e) {
+    loadError = e.message;
+  }).then(function () { loading = null; });
+  return loading;
+}
+
+function render() {
+  document.querySelector("#hdr .d").textContent = data.day;
+  document.querySelector("#hdr .r").textContent = data.ref;
+  document.getElementById("credit").textContent = data.credit;
+  roll.style.fontSize = SETTINGS.font + "vh";
+  roll.textContent = data.txt + "\n\nThe Gospel of the Lord.";
+}
+
+function inYodeck() { return typeof exit_widget === "function"; }
+
+function scroll() {
+  var y = win.clientHeight, last = performance.now();
+  roll.style.visibility = "visible";
+  function step(now) {
+    y -= SETTINGS.speed * Math.min(now - last, 100) / 1000;
+    last = now;
+    if (-y > roll.offsetHeight) {
+      if (inYodeck()) { roll.style.visibility = "hidden"; running = false; exit_widget(); return; }
+      y = win.clientHeight;   // plain browser: loop
+    }
+    roll.style.transform = "translateY(" + y + "px)";
+    requestAnimationFrame(step);
+  }
+  roll.style.transform = "translateY(" + y + "px)";
+  requestAnimationFrame(step);
+}
+
+function begin() {
+  if (running) return;
+  running = true;
+  msg.textContent = "";
+  load().then(function () {
+    if (data && loadedFor === today()) { scroll(); return; }
+    msg.textContent = "Could not load the Gospel (" + (loadError || "unknown error") + ")";
+    setTimeout(function () { running = false; if (inYodeck()) exit_widget(); }, SETTINGS.error_seconds * 1000);
+  });
+}
+
+/* Turn whatever Yodeck sends for a color into a CSS color string ("" if not understood) */
+var unknownColors = [];
+function color(v, name) {
+  try {
+    if (v === null || v === undefined || v === "") return "";
+    if (typeof v === "object") {
+      if ("r" in v && "g" in v && "b" in v)
+        return "rgba(" + v.r + "," + v.g + "," + v.b + "," + ("a" in v ? v.a : 1) + ")";
+      var keys = ["color", "value", "rgba", "rgb", "hex", "hex8"];
+      for (var i = 0; i < keys.length; i++) if (v[keys[i]]) return color(v[keys[i]], name);
+      if (typeof v.toRgbString === "function") return v.toRgbString();
+    }
+    var s = String(v).trim();
+    if (/^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(s)) s = "#" + s;   // hex without the #
+    var test = document.createElement("div");
+    test.style.color = s;
+    if (test.style.color) return s;
+  } catch (e) { /* fall through */ }
+  unknownColors.push(name + "=" + JSON.stringify(v));
+  return "";
+}
+
+/* Apply every visual setting (size and colors) right now */
+function applySettings() {
+  roll.style.fontSize = SETTINGS.font + "vh";
+  applyColors();
+}
+
+/* Paint the screen with the chosen colors */
+function applyColors() {
+  var bg = SETTINGS.bg;
+  document.body.style.background = bg;
+  document.body.style.color = SETTINGS.fg;
+  document.querySelector("#hdr .d").style.color = SETTINGS.accent;
+  document.getElementById("hdr").style.background = "linear-gradient(" + bg + " 75%, transparent)";
+  document.getElementById("fade").style.background = "linear-gradient(transparent, " + bg + ")";
+  // reference line and credit: text color, slightly faded
+  document.querySelector("#hdr .r").style.color = SETTINGS.fg;
+  document.querySelector("#hdr .r").style.opacity = "0.75";
+  document.getElementById("credit").style.color = SETTINGS.fg;
+  document.getElementById("credit").style.opacity = "0.45";
+  document.getElementById("msg").style.color = SETTINGS.fg;
+  var dbg = document.getElementById("dbg");
+  dbg.textContent = DEBUG;
+  dbg.style.display = DEBUG ? "block" : "none";
+}
+
+/* "Run before minute": run only when the current minute is <= the setting.
+   0 or 60 (or blank) means always run. */
+function shouldRun(now) {
+  var limit = SETTINGS.runBefore;
+  if (!(limit > 0 && limit < 60)) return true;
+  return now.getMinutes() <= limit;
+}
+
+/* ===== Yodeck HTML App hooks ===== */
+function init_widget(config) {
+  if (typeof config === "string") { try { config = JSON.parse(config); } catch (e) { config = null; } }
+  if (config) {
+    var n;
+    n = parseFloat(config.speed); if (n > 0) SETTINGS.speed = n;
+    n = parseFloat(config.font);  if (n > 0) SETTINGS.font  = n;
+    var c;
+    n = parseFloat(config.runbefore); SETTINGS.runBefore = n >= 0 ? n : 0;
+    c = color(config.bg, "bg");         if (c) SETTINGS.bg = c;
+    c = color(config.fg, "fg");         if (c) SETTINGS.fg = c;
+    c = color(config.accent, "accent"); if (c) SETTINGS.accent = c;
+    if (config.debug === true || config.debug === "true") {
+      DEBUG = "config: " + JSON.stringify(config) +
+              (unknownColors.length ? "  |  not understood: " + unknownColors.join(", ") : "") +
+              "  |  using speed=" + SETTINGS.speed + " font=" + SETTINGS.font + " bg=" + SETTINGS.bg + " fg=" + SETTINGS.fg + " accent=" + SETTINGS.accent +
+              " runBefore=" + SETTINGS.runBefore + "  |  v" + APP_VERSION;
+    }
+  }
+  applySettings();
+  load();
+}
+function start_widget() {             // called each time the slide comes on screen
+  if (inYodeck() && !shouldRun(new Date())) {
+    document.body.style.visibility = "hidden";        // not our time: skip straight to the next slide
+    setTimeout(function () { exit_widget(); }, 50);
+    return;
+  }
+  document.body.style.visibility = "visible";
+  begin();
+}
+function stop_widget() {}
+
+/* Plain browser (no Yodeck): start by itself */
+setTimeout(function () { if (!inYodeck()) { applySettings(); begin(); } }, 500);
+</script>
+</body>
+</html>

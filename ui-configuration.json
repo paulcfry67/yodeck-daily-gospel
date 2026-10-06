@@ -1,0 +1,12 @@
+{
+  "fields": ["speed", "font", "runbefore", "bg", "fg", "accent", "debug"],
+  "schema": {
+    "speed":     { "title": "Scroll speed (pixels per second, default 80)", "type": "Text" },
+    "font":      { "title": "Text size (% of screen height, default 4.2)", "type": "Text" },
+    "runbefore": { "title": "Run before minute (0-60; 0 or 60 = always run)", "type": "Text" },
+    "bg":        { "title": "Background color", "type": "SpectrumColorPicker" },
+    "fg":        { "title": "Text color", "type": "SpectrumColorPicker" },
+    "accent":    { "title": "Accent color (day line at top)", "type": "SpectrumColorPicker" },
+    "debug":     { "title": "Show debug info", "type": "Checkbox" }
+  }
+}
